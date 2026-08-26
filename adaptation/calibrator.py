@@ -46,6 +46,7 @@ if TYPE_CHECKING:
 LABEL_SEQUENCE: list[tuple[int, str]] = list(
     (label_id, label) for label, label_id in LABEL_TO_ID.items()
 )
+REST_INCREMENTAL_SAVE_INTERVAL_SEC = 10.0
 
 
 def _offline_parameter_snapshot(config: Any) -> dict[str, Any]:
@@ -319,7 +320,9 @@ class Calibrator:
         self._model.save(self._model_path)
         self._save_metadata(metrics=metrics, windows_collected=int(processed_windows.shape[0]), head_only=False)
         self._write_session_summary(session_dir, metrics=metrics, windows_collected=int(processed_windows.shape[0]), session_metadata=session_metadata)
+        SessionRecorder.prepare_final_bundle(session_dir)
         self._seal_session_bundle(session_dir)
+        SessionRecorder.finalize_session(session_dir)
         self._console.print("[bold green]采集完成，请等待工作人员[/bold green]")
         if heartbeat is not None:
             heartbeat()
@@ -392,7 +395,9 @@ class Calibrator:
             windows_collected=windows_collected,
             session_metadata=session_metadata,
         )
+        SessionRecorder.prepare_final_bundle(session_dir)
         self._seal_session_bundle(session_dir, include_model_files=False)
+        SessionRecorder.finalize_session(session_dir)
         if heartbeat is not None:
             heartbeat()
         return CollectionResult(
@@ -421,14 +426,21 @@ class Calibrator:
     ]:
         self._console.print("[bold cyan]开始左右手二分类运动想象采集[/bold cyan]")
         self._print_instructions(plan)
-        self._acquirer.start_stream()
-        recorder = SessionRecorder(
-            self._acquirer,
-            sfreq=self._source_sfreq,
-            n_channels=self._acquirer.metadata.n_channels,
-        )
         session_id = self._session_id or f"session_{secrets.token_hex(6)}"
         session_dir = self._session_records_dir / session_id if self._session_records_dir is not None else None
+        self._acquirer.start_stream()
+        try:
+            recorder = SessionRecorder(
+                self._acquirer,
+                sfreq=self._source_sfreq,
+                n_channels=self._acquirer.metadata.n_channels,
+                output_dir=session_dir,
+                session_id=session_id,
+                total_trials=plan.total_formal_trials,
+            )
+        except BaseException:
+            self._acquirer.stop_stream()
+            raise
         trials: list[dict[str, Any]] = []
         try:
             self._wait_for_first_samples(recorder, heartbeat=heartbeat)
@@ -441,54 +453,76 @@ class Calibrator:
                 pause_control=pause_control,
             )
             self._emit_event(recorder, "session_end", phase="session")
-        finally:
+            self._flush_recorder(recorder)
+            self._acquirer.stop_stream()
+            if heartbeat is not None:
+                heartbeat()
+        except BaseException as exc:
             try:
                 self._flush_recorder(recorder)
-            finally:
-                try:
-                    self._acquirer.stop_stream()
-                finally:
-                    if heartbeat is not None:
-                        heartbeat()
+            except BaseException:
+                pass
+            try:
+                self._acquirer.stop_stream()
+            except BaseException:
+                pass
+            if heartbeat is not None:
+                heartbeat()
+            try:
+                recorder.abort(error=f"{type(exc).__name__}: {exc}")
+            except BaseException:
+                # Preserve the acquisition exception; the writer error will also
+                # be visible in checkpoint state when persistence itself failed.
+                pass
+            raise
 
-        session_metadata = self._build_session_metadata(
-            plan,
-            session_id=session_id,
-            trials=trials,
-        )
-        if session_dir is not None:
-            recorder.export(session_dir, metadata=session_metadata)
-        if window_filename is None:
-            empty_windows = np.empty(
-                (0, self._acquirer.metadata.n_channels, 0),
-                dtype=np.float32,
+        try:
+            session_metadata = self._build_session_metadata(
+                plan,
+                session_id=session_id,
+                trials=trials,
             )
+            if session_dir is not None:
+                recorder.export(session_dir, metadata=session_metadata)
+            if window_filename is None:
+                empty_windows = np.empty(
+                    (0, self._acquirer.metadata.n_channels, 0),
+                    dtype=np.float32,
+                )
+                recorder.mark_processing_complete()
+                return (
+                    session_dir,
+                    empty_windows,
+                    empty_windows.copy(),
+                    np.empty(0, dtype=np.int64),
+                    np.empty(0, dtype=np.int64),
+                    session_metadata,
+                )
+            eeg = self._get_continuous_eeg(session_dir=session_dir, recorder=recorder)
+            raw_windows, processed_windows, labels, trial_groups = self._build_mi_windows(
+                eeg=eeg,
+                events=recorder.events,
+                trials=trials,
+                session_dir=session_dir,
+                window_filename=window_filename,
+            )
+            if raw_windows.shape[0] == 0:
+                raise RuntimeError("Collection did not yield any valid MI windows.")
+            recorder.mark_processing_complete()
             return (
                 session_dir,
-                empty_windows,
-                empty_windows.copy(),
-                np.empty(0, dtype=np.int64),
-                np.empty(0, dtype=np.int64),
+                raw_windows,
+                processed_windows,
+                labels,
+                trial_groups,
                 session_metadata,
             )
-        eeg = self._get_continuous_eeg(session_dir=session_dir, recorder=recorder)
-        raw_windows, processed_windows, labels, trial_groups = self._build_mi_windows(
-            eeg=eeg,
-            events=recorder.events,
-            trials=trials,
-            session_dir=session_dir,
-            window_filename=window_filename,
-        )
-        if raw_windows.shape[0] == 0:
-            raise RuntimeError("Collection did not yield any valid MI windows.")
-        return (
-            session_dir,
-            raw_windows,
-            processed_windows,
-            labels,
-            trial_groups,
-            session_metadata,
-        )
+        except BaseException as exc:
+            try:
+                recorder.mark_processing_failed(error=f"{type(exc).__name__}: {exc}")
+            except BaseException:
+                pass
+            raise
 
     def _run_formal_blocks(
         self,
@@ -548,6 +582,13 @@ class Calibrator:
                         attempt_index += 1
                         continue
                     trials.append(trial_info)
+                    self._persist_recorder(
+                        recorder,
+                        completed_trials=len(trials),
+                        total_trials=plan.total_formal_trials,
+                        last_completed_block=block_index + 1,
+                        last_completed_trial_in_block=trial_index + 1,
+                    )
                     self._update_trial_progress(
                         completed_trials=len(trials),
                         total_trials=plan.total_formal_trials,
@@ -564,6 +605,7 @@ class Calibrator:
                     block_index=block_index,
                     next_block_index=block_index + 1,
                 )
+                self._persist_recorder(recorder)
                 self._console.print(
                     f"[bold yellow]休息 {plan.rest_between_blocks_sec:.0f} 秒，请放松但不要大幅动作[/bold yellow]"
                 )
@@ -573,6 +615,9 @@ class Calibrator:
                         recorder=recorder,
                         heartbeat=heartbeat,
                         stage_name=f"Block {block_index + 1} 休息",
+                        incremental_save_interval_sec=(
+                            REST_INCREMENTAL_SAVE_INTERVAL_SEC
+                        ),
                     )
                 finally:
                     try:
@@ -583,6 +628,7 @@ class Calibrator:
                             block_index=block_index,
                             next_block_index=block_index + 1,
                         )
+                        self._persist_recorder(recorder)
                     finally:
                         if pause_control is not None:
                             pause_control.set_automatic_break(False)
@@ -1010,7 +1056,15 @@ class Calibrator:
                 )
         checksums: list[dict[str, Any]] = []
         for path in sorted(session_dir.iterdir()):
-            if not path.is_file() or path == metadata_path:
+            if (
+                not path.is_file()
+                or path == metadata_path
+                or path.name in {
+                    "checkpoint.json",
+                    "events.jsonl",
+                    "metadata.partial.json",
+                }
+            ):
                 continue
             checksums.append(
                 {
@@ -1136,6 +1190,12 @@ class Calibrator:
             **payload,
         )
 
+    @staticmethod
+    def _persist_recorder(recorder: Any, **progress: Any) -> None:
+        persist = getattr(recorder, "persist", None)
+        if callable(persist):
+            persist(**progress)
+
     def _sleep_with_recording(
         self,
         duration_sec: float,
@@ -1145,13 +1205,31 @@ class Calibrator:
         stage_name: str = "",
         pause_control: CollectionPauseControl | None = None,
         interruptible: bool = False,
+        incremental_save_interval_sec: float | None = None,
     ) -> None:
         total = max(float(duration_sec), 0.0)
         started_at = time.monotonic()
         deadline = started_at + total
+        save_interval = (
+            max(float(incremental_save_interval_sec), 0.1)
+            if incremental_save_interval_sec is not None
+            else None
+        )
+        next_incremental_save = (
+            started_at + save_interval if save_interval is not None else None
+        )
         self._update_stage_progress(stage_name=stage_name, elapsed_sec=0.0, duration_sec=total)
         while time.monotonic() < deadline:
             self._flush_recorder(recorder)
+            now = time.monotonic()
+            if (
+                next_incremental_save is not None
+                and save_interval is not None
+                and now >= next_incremental_save
+            ):
+                self._persist_recorder(recorder)
+                while next_incremental_save <= now:
+                    next_incremental_save += save_interval
             if (
                 interruptible
                 and pause_control is not None
@@ -1187,14 +1265,21 @@ class Calibrator:
             block_index=block_index,
             trial_index=trial_index,
         )
+        self._persist_recorder(recorder)
         self._console.print("[bold yellow]休息（点击“继续采集”后恢复）[/bold yellow]")
         self._update_stage_progress(
             stage_name="手动休息",
             elapsed_sec=0.0,
             duration_sec=0.0,
         )
+        next_incremental_save = time.monotonic() + REST_INCREMENTAL_SAVE_INTERVAL_SEC
         while pause_control.paused:
             self._flush_recorder(recorder)
+            now = time.monotonic()
+            if now >= next_incremental_save:
+                self._persist_recorder(recorder)
+                while next_incremental_save <= now:
+                    next_incremental_save += REST_INCREMENTAL_SAVE_INTERVAL_SEC
             if heartbeat is not None:
                 heartbeat()
             time.sleep(0.05)
@@ -1205,6 +1290,7 @@ class Calibrator:
             block_index=block_index,
             trial_index=trial_index,
         )
+        self._persist_recorder(recorder)
 
     def _update_stage_progress(self, *, stage_name: str, elapsed_sec: float, duration_sec: float) -> None:
         progress = getattr(self._console, "set_stage_progress", None)

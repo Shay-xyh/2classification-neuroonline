@@ -11,8 +11,10 @@
 - 准备足够磁盘空间和备用移动硬盘。
 - 关闭睡眠、屏保、自动更新、通知和不必要的后台程序。
 
-当前Python采集器在session正常结束后统一导出主要文件。为防止程序或电脑中途异常，正式
-实验必须同时使用博睿康原生软件录制一份原始数据作为备份。
+当前Python采集器会在每个有效trial结束后增量保存EEG、事件和进度检查点，休息阶段每10秒
+保存一次连续EEG；session正常结束后再统一生成主要文件。增量保存可以避免一次异常丢失
+整场Python数据，但它不能替代独立记录，因此正式实验仍必须同时使用博睿康原生软件录制
+一份原始数据作为备份。
 
 ## 二、被试到场前
 
@@ -78,6 +80,8 @@ Set-Location D:\path\to\oi-mi
 - 观察博睿康原生波形和JellyFish连接状态。
 - 有效trial进度位于刺激首屏下方；工作人员需要查看时向下滚动，查看后向上滚动返回刺激画面。
 - 每完成100个有效trial自动休息180秒，结束后自动继续。
+- `records_storage/<subject>/collection/<session_id>/checkpoint.json` 中的
+  `completed_trials` 是已经和对应EEG、事件一起落盘的准确进度。
 - `Esc` 只退出电脑全屏，不会停止采集。
 - 左上角 `≪` 会请求暂停并离开刺激页，不应当作普通返回按钮使用。
 
@@ -132,8 +136,20 @@ mi_windows.npz
 
 1. 记录发生时的block、trial和屏幕状态；
 2. 停止本次session，不要把不同session文件手动拼接；
-3. 保留项目目录、`.runtime`状态和博睿康原生备份；
+3. 保留项目目录、`.runtime`状态、未完成session中的 `raw_chunks`、`events.jsonl`、
+   `checkpoint.json` 和博睿康原生备份；
 4. 修复连接后使用新的session重新采集；
-5. 不要删除失败记录，留作审计。
+5. 不要删除失败记录，留作恢复与审计；`checkpoint.json` 的 `completed_trials` 表示最后
+   一次完整持久化的有效trial数量。
+
+将最后一次检查点覆盖的EEG和事件导出为明确标记的部分文件：
+
+```powershell
+.\.venv\Scripts\python.exe tools\recover_partial_collection.py `
+  records_storage\<subject>\collection\<session_id>
+```
+
+该命令只生成 `continuous_eeg.partial.npy`、`events.partial.json` 和 `recovery.json`，不会
+把中断session伪装成正常完成的正式数据，也不会自动续采或拼接session。
 
 数据结构与对齐细节见 [数据与时间对齐](DATA_FORMAT.md)。

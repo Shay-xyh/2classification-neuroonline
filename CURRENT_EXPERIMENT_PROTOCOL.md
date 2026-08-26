@@ -66,13 +66,13 @@
 
 ## 5. 采集与采后处理顺序
 
-1. 采集中只向会话记录器内存追加 250 Hz、59 通道连续 EEG，并记录事件对应的源数据
-   `sample_index`；不实时运行模型、预处理或切窗。
-2. `session_end` 后停止设备流并原子写入 `continuous_eeg.npy`、`events.json` 和初始 `metadata.json`。
-3. 对整段连续数据统一处理：非有限值修复、去除逐通道直流、坏通道检测与修复、平均参考、250→200 Hz 重采样和带通滤波。
-4. 将每个有效 trial 的 `motor_imagery_on_sample` 映射到 200 Hz 连续处理结果，从该点切取完整 4 秒。
-5. 对每个窗口执行质量判定和数值裁剪；不合格窗口计入质量报告，但不进入最终有效窗口集合。
-6. 保存 `mi_windows.npz`，最后计算文件校验和并把完整性状态写回 `metadata.json`。
+1. 采集中持续接收 250 Hz、59 通道连续 EEG，并按源数据 `sample_index` 记录事件；不实时运行模型、预处理或切窗。
+2. 每个有效 trial 完成后由后台线程增量保存新增 EEG、事件和进度检查点；自动休息及手动暂停期间每 10 秒增量保存一次。检查点不包含墙钟或绝对时间。
+3. `session_end` 后停止设备流并原子生成 `continuous_eeg.npy`、`events.json` 和初始 `metadata.json`。
+4. 对整段连续数据统一处理：非有限值修复、去除逐通道直流、坏通道检测与修复、平均参考、250→200 Hz 重采样和带通滤波。
+5. 将每个有效 trial 的 `motor_imagery_on_sample` 映射到 200 Hz 连续处理结果，从该点切取完整 4 秒。
+6. 对每个窗口执行质量判定和数值裁剪；不合格窗口计入质量报告，但不进入最终有效窗口集合。
+7. 保存 `mi_windows.npz`，最后计算文件校验和并把完整性状态写回 `metadata.json`。
 
 因此，采集线程不会实时切窗或实时预处理；预处理和切窗都在刺激会话结束后完成。处理顺序是“先对整段连续信号统一预处理，再按事件边界切窗”，避免对每个独立 4 秒片段滤波造成边缘伪迹。
 
@@ -83,7 +83,8 @@ records_storage/<subject>/collection/<session_id>/
 ├── continuous_eeg.npy
 ├── events.json
 ├── metadata.json
-└── mi_windows.npz
+├── mi_windows.npz
+└── checkpoint.json
 ```
 
 - `continuous_eeg.npy`：未经采后预处理的 250 Hz、59 通道连续 EEG。
@@ -92,6 +93,7 @@ records_storage/<subject>/collection/<session_id>/
 - `mi_windows.npz/raw_windows`：逐通道去直流并降采样到 200 Hz、尚未完成完整滤波的 4 秒窗口。
 - `mi_windows.npz/processed_windows`：完成坏通道处理、平均参考、降采样、带通滤波、质量控制和裁剪后的 4 秒窗口。
 - `mi_windows.npz/window_start_samples` 与 `window_stop_samples`：窗口在 250 Hz 连续源数据中的边界，每个完整窗口相差 1000 点。
+- `checkpoint.json`：增量保存状态和已持久化有效 trial 数；不包含绝对时间。
 
 整个正式采集入口不创建模型对象，不读取模型权重，也不调用训练、推理或在线更新代码。采后训练必须由独立命令显式启动。
 

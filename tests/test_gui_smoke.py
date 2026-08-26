@@ -118,7 +118,6 @@ class GuiSmokeTests(unittest.TestCase):
 
         self.assertEqual(gui._resolve_cue_symbol("← LEFT", event_type="cue"), ("←", False))
         self.assertEqual(gui._resolve_cue_symbol("→ RIGHT", event_type="cue"), ("→", False))
-        self.assertIsNone(gui._resolve_cue_symbol("PRACTICE → RIGHT", event_type="cue"))
         self.assertEqual(gui._resolve_cue_symbol("PROMPT HAND LEFT", event_type="cue"), ("手", False))
         self.assertEqual(gui._resolve_cue_symbol("FIXATION", event_type="cue"), ("+", False))
         self.assertIsNone(gui._resolve_cue_symbol("○", event_type="cue"))
@@ -324,6 +323,8 @@ class GuiSmokeTests(unittest.TestCase):
                 )
 
     def test_fixed_collection_run_has_no_legacy_operator_controls(self) -> None:
+        import gui
+
         gui_path = Path(__file__).resolve().parents[1] / "gui.py"
         source = gui_path.read_text(encoding="utf-8")
 
@@ -335,6 +336,10 @@ class GuiSmokeTests(unittest.TestCase):
         self.assertNotIn('key="calibration_pause"', source)
         self.assertNotIn('key="calibration_resume"', source)
         self.assertNotIn('key="calibration_finish"', source)
+        self.assertEqual(
+            gui._COLLECTION_VIEWS,
+            frozenset({"guidance", "ready", "trial_test", "run"}),
+        )
         self.assertIn("_start_collection_worker", source)
         self.assertIn("collection_stimulus_surface_epoch", source)
         self.assertIn('key=f"collection_stimulus_surface_{surface_epoch}"', source)

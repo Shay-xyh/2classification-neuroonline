@@ -122,7 +122,6 @@ def _write_collection_status(config: dict, payload: dict[str, object]) -> None:
     document = {
         "schema_version": _COLLECTION_STATUS_SCHEMA,
         "subject_id": str(config.get("subject_id", "")),
-        "updated_at_unix": time.time(),
         **payload,
     }
     temporary = path.with_suffix(f"{path.suffix}.tmp")
@@ -467,10 +466,6 @@ def _resolve_cue_symbol(message: str, *, event_type: str) -> tuple[str, bool] | 
             return _DISPLAY_SYMBOLS["LEFT"], False
         if normalized == TEST_MODE_PROMPTS[1]:
             return _DISPLAY_SYMBOLS["RIGHT"], False
-    if "接下来是" in message and "练习" in message:
-        return _DISPLAY_SYMBOLS["BLANK"], False
-    if "练习结束" in message:
-        return _DISPLAY_SYMBOLS["BLANK"], False
     return None
 
 
@@ -483,14 +478,10 @@ def _subject_facing_message(message: str, *, prediction: bool) -> str:
         return ""
     if "测试模式启动" in message:
         return "准备开始"
-    if "接下来是" in message and "练习" in message:
-        return "接下来是练习 trial"
-    if "练习结束" in message:
-        return "练习结束"
     return ""
 
 SIDEBAR_NAV_PAGES = ("首页", "设置", "连通检测", "数据采集", "测试模式", "实时解码")
-_COLLECTION_VIEWS = frozenset({"guidance", "ready", "practice", "trial_test", "run"})
+_COLLECTION_VIEWS = frozenset({"guidance", "ready", "trial_test", "run"})
 
 
 def _resolve_logo_svg_path() -> Path | None:
@@ -1238,44 +1229,12 @@ def init_live_view(
     return console, refresh
 
 
-def run_collection_practice_preview(protocol: ProtocolConfig) -> None:
-    """Run one hardware-free left/right practice sequence."""
-
-    console, refresh = init_live_view(fullscreen=True, show_debug=True)
-    preview_labels = list(TASK_LABELS)
-    total_trials = len(preview_labels)
-    timing = protocol.trial_timing
-
-    _run_preview_event(
-        console,
-        refresh,
-        message=f"接下来是 {total_trials} 个练习 trial，用于熟悉流程",
-        stage_name="练习说明",
-        duration_sec=3.0,
-    )
-    for index, label in enumerate(preview_labels, start=1):
-        _run_visual_trial(
-            console,
-            refresh,
-            label=label,
-            timing=timing,
-            trial_number=f"练习 {index}/{total_trials}",
-        )
-    _run_preview_event(
-        console,
-        refresh,
-        message="练习结束",
-        stage_name="练习结束",
-        duration_sec=3.0,
-    )
-
-
 def run_collection_trial_test(protocol: ProtocolConfig) -> None:
     """Show one left and one right trial without EEG or file output.
 
     This deliberately follows ``Calibrator._run_trial``: fixation, animated
     hand prompt, then the labeled arrow imagery interval. The preview has no
-    extra practice trial, so each hand appears exactly once.
+    extra trial, so each hand appears exactly once.
     """
 
     console, refresh = init_live_view(fullscreen=True, show_debug=True)
@@ -1665,7 +1624,9 @@ def render_settings(config: dict) -> None:
 
     rest_between_blocks_sec = float(
         st.number_input(
-            "每 100 个有效 trial 自动休息（秒）",
+            "每个 block（"
+            f"{collection_trials_per_class_per_block * len(TASK_LABELS)} 个有效 trial）"
+            "结束后自动休息（秒）",
             min_value=0.0,
             value=float(protocol_cfg.get("rest_between_blocks_sec", 180.0)),
             step=5.0,
@@ -1998,11 +1959,6 @@ def render_collection(config: dict) -> None:
                 protocol,
                 hardware_free_rehearsal=rehearsal_mode,
             )
-        elif collection_view == "practice":
-            run_collection_practice_preview(protocol)
-            st.session_state.pop("collection_view", None)
-            st.session_state.gui_nav_mode = "数据采集"
-            st.rerun()
         elif collection_view == "trial_test":
             run_collection_trial_test(protocol)
             st.session_state.pop("collection_view", None)
@@ -2079,11 +2035,8 @@ def render_collection(config: dict) -> None:
         "箭头结束后立即进入下一 trial 的注视十字。"
     )
 
-    tutorial_col, practice_col, test_col, rehearsal_col, run_col = st.columns(
-        [1, 1, 1, 1.15, 1.3]
-    )
+    tutorial_col, test_col, rehearsal_col, run_col = st.columns([1, 1, 1.15, 1.3])
     tutorial_requested = tutorial_col.button("查看范式", type="secondary", use_container_width=True)
-    practice_requested = practice_col.button("左右手练习", type="secondary", use_container_width=True)
     trial_test_requested = test_col.button("画面测试", type="secondary", use_container_width=True)
     rehearsal_requested = rehearsal_col.button(
         "无硬件演练",
@@ -2096,10 +2049,6 @@ def render_collection(config: dict) -> None:
         st.session_state.collection_view = "guidance"
         st.session_state.collection_after_guidance = "return"
         st.session_state.collection_guidance_step = 0
-        st.rerun()
-
-    if practice_requested:
-        st.session_state.collection_view = "practice"
         st.rerun()
 
     if trial_test_requested:

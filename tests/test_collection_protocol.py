@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from types import SimpleNamespace
+import time
 
 import numpy as np
 import pytest
@@ -131,6 +132,33 @@ def test_automatic_break_is_explicitly_bracketed_by_events() -> None:
     ]
     assert break_states == [True]
     assert not control.automatic_break
+
+
+def test_long_rest_periodically_queues_incremental_saves(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calibrator = Calibrator.__new__(Calibrator)
+    calibrator._flush_recorder = lambda recorder: None
+    calibrator._update_stage_progress = lambda **kwargs: None
+    persists: list[float] = []
+    clock = {"now": 0.0}
+
+    def advance(seconds: float) -> None:
+        clock["now"] += float(seconds)
+
+    monkeypatch.setattr(time, "monotonic", lambda: clock["now"])
+    monkeypatch.setattr(time, "sleep", advance)
+    recorder = SimpleNamespace(persist=lambda **kwargs: persists.append(time.monotonic()))
+
+    calibrator._sleep_with_recording(
+        0.22,
+        recorder=recorder,
+        heartbeat=None,
+        stage_name="automatic break",
+        incremental_save_interval_sec=0.1,
+    )
+
+    assert len(persists) >= 2
 
 
 def test_discarded_trial_is_recollected_with_the_same_label() -> None:

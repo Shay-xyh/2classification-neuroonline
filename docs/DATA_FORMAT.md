@@ -9,10 +9,37 @@ records_storage/<subject>/collection/<session_id>/
 ├── continuous_eeg.npy
 ├── events.json
 ├── metadata.json
-└── mi_windows.npz
+├── mi_windows.npz
+└── checkpoint.json
 ```
 
 正式采集不创建模型文件。
+
+采集尚未结束时，session目录会立即创建，并包含：
+
+```text
+raw_chunks/chunk_*.npy
+events.jsonl
+metadata.partial.json
+checkpoint.json
+```
+
+每个有效trial结束后，后台写盘线程依次原子保存新增EEG分块、追加事件日志，然后更新
+`checkpoint.json`。只有对应EEG与事件已经执行 `flush` 和 `fsync` 后，
+`completed_trials` 才会前移。自动休息和手动暂停期间每10秒额外保存一次连续EEG。
+
+正常结束并生成最终文件后，`raw_chunks`、`events.jsonl` 和
+`metadata.partial.json` 会被删除；`checkpoint.json` 保留并标记为 `complete`。
+
+采集中可以在另一个PowerShell窗口查看准确进度：
+
+```powershell
+Get-Content records_storage\<subject>\collection\<session_id>\checkpoint.json
+```
+
+异常中断时不要删除包含 `raw_chunks` 和 `events.jsonl` 的session目录。这些文件是已持久化
+的部分连续EEG与审计事件；`checkpoint.json` 中最后一次提交的 `completed_trials` 是保守、
+可验证的有效trial数量。
 
 ## 2. 连续EEG
 
@@ -149,4 +176,3 @@ n_channels = 59
 
 `source_packet_loss` 表示JellyFish数据包时间不连续。此时不要仅凭窗口数量判定数据可用，
 应结合博睿康原生备份和丢包位置进一步审计。
-
