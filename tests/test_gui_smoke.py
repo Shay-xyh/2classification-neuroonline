@@ -177,10 +177,28 @@ class GuiSmokeTests(unittest.TestCase):
             "允许结束前的最少训练窗口秒数",
             {number_input.label for number_input in app.number_input},
         )
+        settings_numbers = {
+            number_input.key: number_input.value for number_input in app.number_input
+        }
+        blocks = int(settings_numbers["settings_collection_blocks"])
+        trials_per_block = int(settings_numbers["settings_trials_per_block"])
         settings_metrics = {metric.label: metric.value for metric in app.metric}
-        self.assertEqual(settings_metrics.get("单个 trial"), "2 + 2 + 4 秒")
-        self.assertEqual(settings_metrics.get("会话结构"), "9 × 100 trial")
-        self.assertEqual(settings_metrics.get("类别"), "左手 / 右手")
+        self.assertEqual(settings_metrics.get("固定 trial"), "2 + 2 + 4 秒")
+        self.assertEqual(
+            settings_metrics.get("总有效 trial"),
+            str(blocks * trials_per_block),
+        )
+        self.assertEqual(
+            settings_metrics.get("左右手数量"),
+            f"各 {blocks * trials_per_block // 2}",
+        )
+        device_select = next(
+            selectbox
+            for selectbox in app.selectbox
+            if selectbox.key == "settings_device_type"
+        )
+        self.assertEqual(len(device_select.options), 2)
+        self.assertIn(device_select.value, {"neuracle", "dummy"})
 
     def test_formal_collection_requires_guidance_then_ready_confirmation(self) -> None:
         gui_path = Path(__file__).resolve().parents[1] / "gui.py"

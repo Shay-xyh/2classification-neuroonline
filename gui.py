@@ -1602,17 +1602,35 @@ def render_home() -> None:
 
 def render_settings(config: dict) -> None:
     st.title("系统设置")
+    st.caption("按实验准备顺序配置；标注为固定的参数不会在此页被修改。")
     register_default_acquirers()
 
     protocol_cfg = config.setdefault("protocol", {})
     output_cfg = config.setdefault("output", {})
     ar_game_cfg = output_cfg.setdefault("ar_game", {})
     device_cfg = config.setdefault("device", {})
+    storage_cfg = config.setdefault("storage", {})
 
-    st.markdown("### 数据采集")
-    st.caption("本节只配置被试与采集设备；正式采集不会加载或运行模型。")
-    subject_id = st.text_input("被试 ID (subject_id)", value=str(config.get("subject_id", "S001")))
-    devices = AcquirerFactory.list_devices()
+    st.markdown("### 1. 被试与采集设备")
+    identity_col, device_col = st.columns(2)
+    subject_id = identity_col.text_input(
+        "被试 ID",
+        value=str(config.get("subject_id", "S001")),
+        key="settings_subject_id",
+        help="用于创建独立的数据目录；正式开始前必须核对。",
+    ).strip()
+    subject_id_valid = bool(
+        subject_id
+        and subject_id not in {".", ".."}
+        and re.fullmatch(r"[A-Za-z0-9_.-]+", subject_id)
+    )
+    if not subject_id_valid:
+        identity_col.error("被试 ID 只能包含字母、数字、下划线、短横线和英文句点。")
+    available_devices = set(AcquirerFactory.list_devices())
+    devices = [name for name in ("neuracle", "dummy") if name in available_devices]
+    if not devices:
+        st.error("没有可用的采集设备后端。")
+        return
     current_device = (
         "dummy"
         if bool(config.get("hardware_dummy_mode", False))
@@ -1620,74 +1638,68 @@ def render_settings(config: dict) -> None:
     )
     device_labels = {
         "dummy": "无硬件（模拟 EEG）",
-        "brainco": "BrainCo",
-        "neuracle": "Neuracle",
+        "neuracle": "博睿康 Neuracle / JellyFish",
     }
-    device_type = st.selectbox(
+    device_type = device_col.selectbox(
         "采集模式 / 设备",
         devices,
         index=devices.index(current_device) if current_device in devices else 0,
         format_func=lambda value: device_labels.get(value, value),
+        key="settings_device_type",
     )
-    if device_type == "dummy":
-        st.caption(
-            "无硬件模式会模拟正式采集端的 250 Hz、59 个纯 EEG 通道；"
-            "不连接采集设备或触发器，采后同样降采样到 200 Hz。"
-        )
+
+    neuracle_host = str(device_cfg.get("neuracle_host", "127.0.0.1"))
+    neuracle_port = int(device_cfg.get("neuracle_port", 8712))
     neuracle_transport_delay_sec = float(
         device_cfg.get("neuracle_transport_delay_sec", 0.0)
     )
-    visual_onset_delay_sec = float(ar_game_cfg.get("visual_onset_delay_sec", 0.0))
     if device_type == "neuracle":
-        timing_col1, timing_col2 = st.columns(2)
-        neuracle_transport_delay_sec = float(
-            timing_col1.number_input(
-                "设备到 JellyFish 固定延迟 (秒)",
-                min_value=0.0,
-                value=neuracle_transport_delay_sec,
-                step=0.001,
-                format="%.3f",
+        jellyfish_host_col, jellyfish_port_col = st.columns([2, 1])
+        neuracle_host = jellyfish_host_col.text_input(
+            "JellyFish 主机地址",
+            value=neuracle_host,
+            key="settings_neuracle_host",
+            help="JellyFish 与 GUI 在同一台电脑时使用 127.0.0.1。",
+        )
+        neuracle_port = int(
+            jellyfish_port_col.number_input(
+                "JellyFish TCP 端口",
+                min_value=1,
+                max_value=65535,
+                value=neuracle_port,
+                step=1,
+                key="settings_neuracle_port",
             )
         )
-        visual_onset_delay_sec = float(
-            timing_col2.number_input(
-                "Unity ACK 到障碍物显示延迟 (秒)",
-                min_value=0.0,
-                value=visual_onset_delay_sec,
-                step=0.001,
-                format="%.3f",
-            )
+        st.info(
+            "正式输入固定按 250 Hz、59 个头皮 EEG 通道检查；通道缺失、重复或采样率不符时拒绝开始。"
         )
-    else:
-        visual_onset_delay_sec = float(
-            st.number_input(
-                "Unity ACK 到障碍物显示延迟 (秒)",
-                min_value=0.0,
-                value=visual_onset_delay_sec,
-                step=0.001,
-                format="%.3f",
+        with st.expander("高级：设备时间对齐", expanded=False):
+            neuracle_transport_delay_sec = float(
+                st.number_input(
+                    "设备到 JellyFish 固定传输延迟（秒）",
+                    min_value=0.0,
+                    value=neuracle_transport_delay_sec,
+                    step=0.001,
+                    format="%.3f",
+                    key="settings_neuracle_transport_delay",
+                    help="没有独立测量结果时保持 0.000；不要凭感觉填写。",
+                )
             )
+            st.caption("该值只做一次固定偏移补偿，不会按 trial 累计。")
+    if device_type == "dummy":
+        st.info(
+            "无硬件模式会模拟正式采集端的 250 Hz、59 个纯 EEG 通道；"
+            "范式、事件、保存和采后处理与正式采集一致。"
         )
 
-    window_sec = float(config.get("window_sec", 4.0))
-    st.markdown("### 采后测试与实时解码")
-    st.caption("下列参数只供显式启动的测试或实时解码使用，不进入正式采集线程。")
-    model_name = str(config.get("model_name", "cbramod"))
-    step_sec = float(
-        st.number_input(
-            "解码刷新步长 (step_sec / 秒)",
-            min_value=0.05,
-            value=float(config.get("step_sec", 0.5)),
-            step=0.05,
-        )
-    )
-
-    st.markdown("### 左右手二分类采集范式")
+    st.markdown("### 2. 采集计划")
+    st.caption("单个 trial 固定为 2 秒注视 + 2 秒手部动画 + 4 秒箭头运动想象。")
     fixed_timing = TrialTiming()
-    structure_col1, structure_col2 = st.columns(2)
+    structure_col1, structure_col2, rest_col = st.columns(3)
     collection_blocks = int(
         structure_col1.number_input(
-            "Block 数量",
+            "Block 数量（个）",
             min_value=1,
             value=int(protocol_cfg.get("collection_blocks", 9)),
             step=1,
@@ -1696,7 +1708,7 @@ def render_settings(config: dict) -> None:
     )
     collection_trials_per_block = int(
         structure_col2.number_input(
-            "每个 block 的有效 trial 数量（左右手各一半）",
+            "每个 block 的有效 trial（个）",
             min_value=2,
             value=int(
                 protocol_cfg.get("collection_trials_per_class_per_block", 50)
@@ -1704,6 +1716,16 @@ def render_settings(config: dict) -> None:
             * len(TASK_LABELS),
             step=2,
             key="settings_trials_per_block",
+            help="必须为偶数，左右手各占一半。",
+        )
+    )
+    rest_between_blocks_sec = float(
+        rest_col.number_input(
+            "Block 间自动休息（秒）",
+            min_value=0.0,
+            value=float(protocol_cfg.get("rest_between_blocks_sec", 180.0)),
+            step=5.0,
+            key="settings_rest_between_blocks",
         )
     )
     structure_valid = collection_trials_per_block % len(TASK_LABELS) == 0
@@ -1712,55 +1734,116 @@ def render_settings(config: dict) -> None:
     )
     if not structure_valid:
         st.error("每个 block 的有效 trial 数必须为偶数，才能保证左右手数量相等。")
-    summary_col1, summary_col2, summary_col3 = st.columns(3)
+    total_trials = collection_blocks * collection_trials_per_block
+    trials_per_class = total_trials // len(TASK_LABELS)
+    pure_trial_seconds = total_trials * fixed_timing.total_sec
+    automatic_rest_seconds = max(collection_blocks - 1, 0) * rest_between_blocks_sec
+    planned_seconds = pure_trial_seconds + automatic_rest_seconds
+    planned_hours = int(planned_seconds // 3600)
+    planned_minutes = int(round((planned_seconds % 3600) / 60.0))
+    if planned_minutes == 60:
+        planned_hours += 1
+        planned_minutes = 0
+    planned_duration = (
+        f"{planned_hours} 小时 {planned_minutes} 分钟"
+        if planned_hours
+        else f"{planned_minutes} 分钟"
+    )
+    summary_col1, summary_col2, summary_col3, summary_col4 = st.columns(4)
     summary_col1.metric(
-        "单个 trial",
+        "固定 trial",
         f"{fixed_timing.fixation_sec:g} + {fixed_timing.cue_sec:g} + "
         f"{fixed_timing.control_sec:g} 秒",
     )
-    summary_col2.metric(
-        "会话结构",
-        f"{collection_blocks} × {collection_trials_per_block} trial",
-    )
-    summary_col3.metric("类别", "左手 / 右手")
+    summary_col2.metric("总有效 trial", f"{total_trials}")
+    summary_col3.metric("左右手数量", f"各 {trials_per_class}")
+    summary_col4.metric("计划总时长", planned_duration)
     st.caption(
         "黑底绿十字 → 手部开合动画 → 黑底绿箭头；箭头结束后直接进入下一 trial。"
-        "正式输入为 250 Hz、59 个纯 EEG 通道，采后统一预处理并降采样到 200 Hz。"
+        f"纯 trial {pure_trial_seconds / 60.0:.1f} 分钟，自动休息 "
+        f"{automatic_rest_seconds / 60.0:.1f} 分钟；手动休息会额外延长。"
     )
 
-    rest_between_blocks_sec = float(
-        st.number_input(
-            "每个 block（"
-            f"{collection_trials_per_block} 个有效 trial）"
-            "结束后自动休息（秒）",
-            min_value=0.0,
-            value=float(protocol_cfg.get("rest_between_blocks_sec", 180.0)),
-            step=5.0,
-        )
-    )
-    st.markdown("### AR 游戏控制")
-    ar_col1, ar_col2, ar_col3 = st.columns(3)
-    ar_game_enabled = ar_col1.checkbox("启用 AR 游戏 TCP 控制", value=bool(ar_game_cfg.get("enabled", False)))
-    ar_game_host = ar_col2.text_input("AR 游戏主机", value=str(ar_game_cfg.get("host", "127.0.0.1")))
-    ar_game_port = int(
-        ar_col3.number_input(
-            "AR 游戏端口",
-            min_value=1,
-            max_value=65535,
-            value=int(ar_game_cfg.get("port", 5005)),
-            step=1,
-        )
-    )
-    ar_game_timeout_sec = float(
-        st.number_input(
-            "AR 游戏 TCP 超时 (秒)",
-            min_value=0.1,
-            value=float(ar_game_cfg.get("timeout_sec", 3.0)),
-            step=0.1,
-        )
+    st.markdown("### 3. 数据保存")
+    records_dir = st.text_input(
+        "数据根目录",
+        value=str(storage_cfg.get("records_dir", "records_storage")),
+        key="settings_records_dir",
+        help="相对路径以项目目录为基准；每个被试和 session 会自动创建子目录。",
+    ).strip()
+    records_dir_valid = bool(records_dir)
+    if not records_dir_valid:
+        st.error("数据根目录不能为空。")
+    st.caption(
+        "正式采集保存连续 250 Hz EEG、样本号事件、元数据、检查点和采后 4 秒窗口；不创建模型文件。"
     )
 
-    if st.button("保存配置", type="primary", disabled=not structure_valid):
+    step_sec = float(config.get("step_sec", 0.5))
+    visual_onset_delay_sec = float(ar_game_cfg.get("visual_onset_delay_sec", 0.0))
+    ar_game_enabled = bool(ar_game_cfg.get("enabled", False))
+    ar_game_host = str(ar_game_cfg.get("host", "127.0.0.1"))
+    ar_game_port = int(ar_game_cfg.get("port", 5005))
+    ar_game_timeout_sec = float(ar_game_cfg.get("timeout_sec", 3.0))
+    with st.expander("独立功能：实时解码与 AR（不影响正式采集）", expanded=False):
+        st.caption("这些参数仅供“测试模式”和“实时解码”页面使用。")
+        step_sec = float(
+            st.number_input(
+                "解码刷新步长（秒）",
+                min_value=0.05,
+                value=step_sec,
+                step=0.05,
+                key="settings_decode_step",
+            )
+        )
+        ar_enabled_col, ar_host_col, ar_port_col = st.columns([1, 2, 1])
+        ar_game_enabled = ar_enabled_col.checkbox(
+            "启用 AR TCP",
+            value=ar_game_enabled,
+            key="settings_ar_enabled",
+        )
+        ar_game_host = ar_host_col.text_input(
+            "AR 主机",
+            value=ar_game_host,
+            key="settings_ar_host",
+        )
+        ar_game_port = int(
+            ar_port_col.number_input(
+                "AR 端口",
+                min_value=1,
+                max_value=65535,
+                value=ar_game_port,
+                step=1,
+                key="settings_ar_port",
+            )
+        )
+        ar_timing_col1, ar_timing_col2 = st.columns(2)
+        ar_game_timeout_sec = float(
+            ar_timing_col1.number_input(
+                "AR TCP 超时（秒）",
+                min_value=0.1,
+                value=ar_game_timeout_sec,
+                step=0.1,
+                key="settings_ar_timeout",
+            )
+        )
+        visual_onset_delay_sec = float(
+            ar_timing_col2.number_input(
+                "Unity ACK 到画面显示延迟（秒）",
+                min_value=0.0,
+                value=visual_onset_delay_sec,
+                step=0.001,
+                format="%.3f",
+                key="settings_visual_onset_delay",
+            )
+        )
+
+    st.divider()
+    if st.button(
+        "保存全部设置",
+        type="primary",
+        disabled=not (structure_valid and subject_id_valid and records_dir_valid),
+        key="settings_save",
+    ):
         protocol_cfg.pop("trial_timing", None)
         protocol_cfg.pop("collection_stride_sec", None)
         protocol_cfg.pop("motor_imagery_start_offset_sec", None)
@@ -1768,10 +1851,8 @@ def render_settings(config: dict) -> None:
         config.update(
             {
                 "subject_id": subject_id,
-                "model_name": model_name,
                 "device_type": device_type,
                 "hardware_dummy_mode": device_type == "dummy",
-                "window_sec": window_sec,
                 "step_sec": step_sec,
             }
         )
@@ -1786,9 +1867,12 @@ def render_settings(config: dict) -> None:
         )
         device_cfg.update(
             {
+                "neuracle_host": neuracle_host,
+                "neuracle_port": neuracle_port,
                 "neuracle_transport_delay_sec": neuracle_transport_delay_sec,
             }
         )
+        storage_cfg["records_dir"] = records_dir
         next_ar_game_cfg = dict(ar_game_cfg)
         next_ar_game_cfg.update(
             {
@@ -1801,7 +1885,7 @@ def render_settings(config: dict) -> None:
         )
         output_cfg["ar_game"] = next_ar_game_cfg
         save_config(config)
-        st.success("配置已保存。")
+        st.success("设置已保存；下一次启动采集时生效。")
 
 
 def render_probe(config: dict) -> None:
