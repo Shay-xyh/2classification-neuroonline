@@ -149,6 +149,88 @@ def _read_collection_status(config: dict) -> dict[str, object] | None:
     return payload
 
 
+_ACTIVE_CHECKPOINT_STATES = frozenset(
+    {"collecting", "raw_exporting", "raw_exported", "processing_complete", "finalizing"}
+)
+
+
+def _read_latest_active_collection_checkpoint(
+    config: dict,
+    *,
+    subject_id: str,
+) -> dict[str, object] | None:
+    """Find the newest independently running collection without controlling it."""
+
+    records_root = Path(
+        str(config.get("storage", {}).get("records_dir", "records_storage"))
+    ).expanduser()
+    if not records_root.is_absolute():
+        records_root = _GUI_ROOT / records_root
+    candidates: list[tuple[int, Path, dict[str, object]]] = []
+    try:
+        checkpoint_paths = records_root.glob("*/collection/*/checkpoint.json")
+        for path in checkpoint_paths:
+            try:
+                if path.parents[2].name != subject_id:
+                    continue
+                payload = json.loads(path.read_text(encoding="utf-8"))
+                if not isinstance(payload, dict):
+                    continue
+                state = str(payload.get("state", ""))
+                if state not in _ACTIVE_CHECKPOINT_STATES:
+                    continue
+                candidates.append((path.stat().st_mtime_ns, path, payload))
+            except (OSError, UnicodeError, json.JSONDecodeError, TypeError, ValueError):
+                continue
+    except OSError:
+        return None
+    if not candidates:
+        return None
+    _modified_ns, path, payload = max(candidates, key=lambda item: item[0])
+    result = dict(payload)
+    result["checkpoint_path"] = str(path)
+    result["subject_id"] = path.parents[2].name
+    return result
+
+
+def _requested_monitor_subject() -> str:
+    try:
+        return str(st.query_params.get("monitor_subject", "")).strip()
+    except Exception:  # noqa: BLE001
+        return ""
+
+
+@st.fragment(run_every=2.0)
+def render_external_collection_progress(config: dict, subject_id: str) -> None:
+    """Render a read-only progress panel for a CLI or other GUI process."""
+
+    checkpoint = _read_latest_active_collection_checkpoint(
+        config,
+        subject_id=subject_id,
+    )
+    if checkpoint is None:
+        return
+    completed = max(int(checkpoint.get("completed_trials", 0)), 0)
+    total = max(int(checkpoint.get("total_trials", 0)), 0)
+    fraction = min(completed / total, 1.0) if total else 0.0
+    st.warning(
+        "检测到另一个进程正在采集。本页只读显示进度，请勿再次开始采集。"
+    )
+    st.progress(
+        fraction,
+        text=f"有效 trial：{completed}/{total}（{fraction * 100:.1f}%）",
+    )
+    block = int(checkpoint.get("last_completed_block", 0))
+    trial_in_block = int(checkpoint.get("last_completed_trial_in_block", 0))
+    st.caption(
+        f"被试：{checkpoint.get('subject_id', '-')} · "
+        f"已完成 Block {block} / Trial {trial_in_block} · "
+        f"连续样本：{int(checkpoint.get('sample_count', 0))} · "
+        f"事件：{int(checkpoint.get('event_count', 0))}"
+    )
+    st.caption(f"只读检查点：`{checkpoint.get('checkpoint_path', '')}`")
+
+
 def _validate_collection_outcome(outcome: dict[str, object]) -> None:
     """Refuse to report success until every experiment-critical artifact exists."""
 
@@ -1976,6 +2058,19 @@ def render_collection(config: dict) -> None:
         return
 
     st.title("运动想象数据采集")
+    monitor_subject = _requested_monitor_subject()
+    external_collection_active = (
+        bool(monitor_subject)
+        and _read_latest_active_collection_checkpoint(
+            config,
+            subject_id=monitor_subject,
+        )
+        is not None
+    )
+    if monitor_subject:
+        render_external_collection_progress(config, monitor_subject)
+    if external_collection_active:
+        return
     if (
         active_worker is not None
         and active_worker.outcome() is None
@@ -2624,7 +2719,8 @@ def main() -> None:
     # commands on the same shared Unity transport.
     start_web_command_server(config)
     _inject_gui_nav_styles()
-    st.session_state.setdefault("gui_nav_mode", SIDEBAR_NAV_PAGES[0])
+    initial_page = "数据采集" if _requested_monitor_subject() else SIDEBAR_NAV_PAGES[0]
+    st.session_state.setdefault("gui_nav_mode", initial_page)
 
     with st.sidebar:
         logo_path = _resolve_logo_svg_path()
