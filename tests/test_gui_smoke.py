@@ -341,6 +341,12 @@ class GuiSmokeTests(unittest.TestCase):
             frozenset({"guidance", "ready", "trial_test", "run"}),
         )
         self.assertIn("_start_collection_worker", source)
+        self.assertIn('key="settings_collection_blocks"', source)
+        self.assertIn('key="settings_trials_per_block"', source)
+        self.assertIn(
+            "collection_trials_per_block // len(TASK_LABELS)",
+            source,
+        )
         self.assertIn("collection_stimulus_surface_epoch", source)
         self.assertIn('key=f"collection_stimulus_surface_{surface_epoch}"', source)
         self.assertIn("_render_computer_fullscreen_control()", source)

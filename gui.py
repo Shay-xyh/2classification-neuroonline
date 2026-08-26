@@ -1684,10 +1684,34 @@ def render_settings(config: dict) -> None:
 
     st.markdown("### 左右手二分类采集范式")
     fixed_timing = TrialTiming()
-    collection_blocks = int(protocol_cfg.get("collection_blocks", 9))
-    collection_trials_per_class_per_block = int(
-        protocol_cfg.get("collection_trials_per_class_per_block", 50)
+    structure_col1, structure_col2 = st.columns(2)
+    collection_blocks = int(
+        structure_col1.number_input(
+            "Block 数量",
+            min_value=1,
+            value=int(protocol_cfg.get("collection_blocks", 9)),
+            step=1,
+            key="settings_collection_blocks",
+        )
     )
+    collection_trials_per_block = int(
+        structure_col2.number_input(
+            "每个 block 的有效 trial 数量（左右手各一半）",
+            min_value=2,
+            value=int(
+                protocol_cfg.get("collection_trials_per_class_per_block", 50)
+            )
+            * len(TASK_LABELS),
+            step=2,
+            key="settings_trials_per_block",
+        )
+    )
+    structure_valid = collection_trials_per_block % len(TASK_LABELS) == 0
+    collection_trials_per_class_per_block = (
+        collection_trials_per_block // len(TASK_LABELS)
+    )
+    if not structure_valid:
+        st.error("每个 block 的有效 trial 数必须为偶数，才能保证左右手数量相等。")
     summary_col1, summary_col2, summary_col3 = st.columns(3)
     summary_col1.metric(
         "单个 trial",
@@ -1696,7 +1720,7 @@ def render_settings(config: dict) -> None:
     )
     summary_col2.metric(
         "会话结构",
-        f"{collection_blocks} × {collection_trials_per_class_per_block * len(TASK_LABELS)} trial",
+        f"{collection_blocks} × {collection_trials_per_block} trial",
     )
     summary_col3.metric("类别", "左手 / 右手")
     st.caption(
@@ -1707,7 +1731,7 @@ def render_settings(config: dict) -> None:
     rest_between_blocks_sec = float(
         st.number_input(
             "每个 block（"
-            f"{collection_trials_per_class_per_block * len(TASK_LABELS)} 个有效 trial）"
+            f"{collection_trials_per_block} 个有效 trial）"
             "结束后自动休息（秒）",
             min_value=0.0,
             value=float(protocol_cfg.get("rest_between_blocks_sec", 180.0)),
@@ -1736,7 +1760,7 @@ def render_settings(config: dict) -> None:
         )
     )
 
-    if st.button("保存配置", type="primary"):
+    if st.button("保存配置", type="primary", disabled=not structure_valid):
         protocol_cfg.pop("trial_timing", None)
         protocol_cfg.pop("collection_stride_sec", None)
         protocol_cfg.pop("motor_imagery_start_offset_sec", None)
