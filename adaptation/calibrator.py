@@ -500,6 +500,10 @@ class Calibrator:
         pause_control: CollectionPauseControl | None,
     ) -> None:
         total_blocks = len(plan.blocks)
+        self._update_trial_progress(
+            completed_trials=len(trials),
+            total_trials=plan.total_formal_trials,
+        )
         for block_index, sequence in enumerate(plan.blocks):
             self._console.print(f"[bold cyan]Block {block_index + 1}/{total_blocks}[/bold cyan] 共 {len(sequence)} 个 trial")
             self._emit_event(recorder, "block_start", phase="formal", block_index=block_index)
@@ -544,6 +548,10 @@ class Calibrator:
                         attempt_index += 1
                         continue
                     trials.append(trial_info)
+                    self._update_trial_progress(
+                        completed_trials=len(trials),
+                        total_trials=plan.total_formal_trials,
+                    )
                     break
             self._emit_event(recorder, "block_end", phase="formal", block_index=block_index)
             if block_index < total_blocks - 1:
@@ -1202,6 +1210,14 @@ class Calibrator:
         progress = getattr(self._console, "set_stage_progress", None)
         if callable(progress):
             progress(stage_name=stage_name, elapsed_sec=elapsed_sec, duration_sec=duration_sec)
+
+    def _update_trial_progress(self, *, completed_trials: int, total_trials: int) -> None:
+        progress = getattr(self._console, "set_trial_progress", None)
+        if callable(progress):
+            progress(
+                completed_trials=completed_trials,
+                total_trials=total_trials,
+            )
 
     def _flush_recorder(self, recorder: SessionRecorder) -> None:
         try:

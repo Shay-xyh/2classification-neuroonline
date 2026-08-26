@@ -135,7 +135,13 @@ def test_automatic_break_is_explicitly_bracketed_by_events() -> None:
 
 def test_discarded_trial_is_recollected_with_the_same_label() -> None:
     calibrator = Calibrator.__new__(Calibrator)
-    calibrator._console = SimpleNamespace(print=lambda message: None)
+    progress: list[tuple[int, int]] = []
+    calibrator._console = SimpleNamespace(
+        print=lambda message: None,
+        set_trial_progress=lambda **kwargs: progress.append(
+            (kwargs["completed_trials"], kwargs["total_trials"])
+        ),
+    )
     events: list[str] = []
     calibrator._emit_event = lambda recorder, name, **payload: events.append(name)
     attempts: list[tuple[str, int]] = []
@@ -170,6 +176,7 @@ def test_discarded_trial_is_recollected_with_the_same_label() -> None:
     assert attempts == [("left", 0), ("left", 1)]
     assert trials == [{"label": "left", "attempt_index": 1}]
     assert events == ["block_start", "trial_discarded", "block_end"]
+    assert progress == [(0, 1), (1, 1)]
 
 
 def test_collection_only_saves_session_without_training_model(tmp_path: Path) -> None:

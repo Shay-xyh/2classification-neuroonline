@@ -559,6 +559,8 @@ class StreamlitConsole:
         self._progress_duration = 0.0
         self._progress_started_at = time.monotonic()
         self._last_progress_render_at = 0.0
+        self._completed_trials = 0
+        self._total_trials = 0
 
     def print(self, message, *args, **kwargs) -> None:
         raw_message = str(message)
@@ -667,6 +669,21 @@ class StreamlitConsole:
                 self._last_progress_render_at = now
         if should_render:
             self._render_fullscreen_surface()
+
+    def set_trial_progress(self, *, completed_trials: int, total_trials: int) -> None:
+        """Publish valid-trial progress for the operator area below the fold."""
+
+        total = max(int(total_trials), 0)
+        completed = min(max(int(completed_trials), 0), total) if total else 0
+        with self._lock:
+            self._completed_trials = completed
+            self._total_trials = total
+
+    def trial_progress(self) -> tuple[int, int]:
+        """Return a thread-safe snapshot of completed and planned trials."""
+
+        with self._lock:
+            return self._completed_trials, self._total_trials
 
     def _render_cue(self, msg: str, *, prediction: bool) -> None:
         mi_frame = resolve_mi_visual(msg)
@@ -1067,6 +1084,47 @@ def enter_experiment_view() -> None:
           top: 2vh;
           left: 2vw;
           width: 4rem !important;
+        }
+        .oi-collection-trial-progress {
+          position: relative;
+          z-index: 2147483646;
+          width: min(760px, calc(100vw - 4rem));
+          margin: calc(100dvh + 2rem) auto 4rem;
+          padding: 1.4rem 1.6rem;
+          border: 1px solid #cbd5e1;
+          border-radius: 1rem;
+          background: rgba(255, 255, 255, 0.98);
+          color: #0f172a;
+          box-shadow: 0 18px 45px rgba(15, 23, 42, 0.28);
+        }
+        .oi-collection-trial-progress-title {
+          display: flex;
+          justify-content: space-between;
+          gap: 1rem;
+          margin-bottom: 0.8rem;
+          font-size: clamp(1rem, 1.8vw, 1.35rem);
+          line-height: 1.3;
+          font-weight: 800;
+        }
+        .oi-collection-trial-progress-track {
+          width: 100%;
+          height: 0.85rem;
+          overflow: hidden;
+          border-radius: 999px;
+          background: #e2e8f0;
+        }
+        .oi-collection-trial-progress-fill {
+          height: 100%;
+          border-radius: inherit;
+          background: #2563eb;
+          transition: width 180ms ease-out;
+        }
+        .oi-collection-trial-progress-hint {
+          margin-top: 0.7rem;
+          color: #64748b;
+          font-size: 0.9rem;
+          line-height: 1.4;
+          text-align: center;
         }
         .st-key-collection_request_pause > button,
         .st-key-collection_pause_pending > button,
@@ -1763,6 +1821,7 @@ def _render_running_collection(
 
     handle.console.render_pending()
     _render_collection_stimulus_surface(handle.console.stimulus_frame())
+    _render_collection_trial_progress(handle.console, protocol)
     outcome = handle.outcome()
     if outcome is not None:
         return outcome
@@ -1810,6 +1869,43 @@ def _render_running_collection(
     time.sleep(0.05)
     st.rerun()
     return None
+
+
+def _render_collection_trial_progress(
+    console: StreamlitConsole,
+    protocol: ProtocolConfig,
+) -> None:
+    """Render valid-trial progress below the stimulus viewport."""
+
+    planned_total = (
+        int(getattr(protocol, "collection_blocks", 9))
+        * int(getattr(protocol, "collection_trials_per_class_per_block", 50))
+        * len(TASK_LABELS)
+    )
+    completed, reported_total = console.trial_progress()
+    total = reported_total if reported_total > 0 else planned_total
+    completed = min(max(int(completed), 0), total) if total > 0 else 0
+    percent = (100.0 * completed / total) if total > 0 else 0.0
+    st.markdown(
+        (
+            "<section class='oi-collection-trial-progress' "
+            "aria-label='正式采集有效 trial 进度'>"
+            "<div class='oi-collection-trial-progress-title'>"
+            f"<span>已完成 {completed} / {total} 个有效 trial</span>"
+            f"<span>{percent:.1f}%</span>"
+            "</div>"
+            "<div class='oi-collection-trial-progress-track' role='progressbar' "
+            f"aria-valuemin='0' aria-valuemax='{total}' aria-valuenow='{completed}'>"
+            "<div class='oi-collection-trial-progress-fill' "
+            f"style='width: {percent:.3f}%'></div>"
+            "</div>"
+            "<div class='oi-collection-trial-progress-hint'>"
+            "向上滚动返回刺激画面；作废的 attempt 不计入进度"
+            "</div>"
+            "</section>"
+        ),
+        unsafe_allow_html=True,
+    )
 
 
 def _request_collection_start(config: dict) -> None:
