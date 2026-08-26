@@ -1,0 +1,50 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "oi-mi"
+version = "0.2.0"
+description = "Binary hand motor-imagery EEG collection and downstream decoding tools"
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+license = { text = "MIT" }
+authors = [
+  { name = "oi-mi contributors" }
+]
+dependencies = [
+  "click",
+  "numpy",
+  "pyedflib",
+  "pyyaml",
+  "rich",
+  "scipy",
+  "streamlit>=1.30",
+]
+
+[project.optional-dependencies]
+brainco = [
+  "bc-ecap-sdk",
+  "zeroconf",
+]
+decoding = [
+  "pylsl",
+  "scikit-learn",
+  "torch",
+]
+all = [
+  "bc-ecap-sdk",
+  "pylsl",
+  "scikit-learn",
+  "torch",
+  "zeroconf",
+]
+
+[project.scripts]
+oi-mi = "cli:cli"
+
+[tool.setuptools]
+py-modules = ["cli", "gui", "web_command_server", "game_command_router"]
+
+[tool.setuptools.packages.find]
+include = ["acquisition*", "adaptation*", "collect*", "decoder*", "models*", "utils*"]

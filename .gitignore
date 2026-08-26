@@ -1,0 +1,49 @@
+.DS_Store
+__pycache__/
+*.py[cod]
+*.so
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.streamlit.*.log
+*.log
+
+# Virtual environments
+*venv*/
+*virtualenv*/
+env*/
+ENV*/
+dist/
+build/
+*.egg-info/
+data/
+models_storage/
+records_storage/
+
+# Local runtime caches and downloaded archives
+.runtime/
+runtime/
+unity_builds/
+ARPrototype3D-windows-x64.zip
+
+# IDE / editor
+.vscode/
+.idea/
+
+# AI assistant / tooling
+.copilot/
+.cursor/
+.windsurf/
+.roo/
+.aider*
+assets/pretrained/*.pth
+
+# Collection-release source exclusions
+config.preflight.yaml
+tmp/
+video/
+volc_upload/
+assets/stimuli/*
+!assets/stimuli/hand-grasp-recorded-v2-30fps.webp

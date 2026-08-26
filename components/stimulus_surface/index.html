@@ -1,0 +1,208 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <style>
+    * { box-sizing: border-box; }
+    html, body, #surface {
+      width: 100%;
+      height: 100%;
+      margin: 0;
+      overflow: hidden;
+    }
+    body, #surface {
+      background: #000;
+    }
+    body.control-only,
+    body.control-only #surface {
+      background: transparent;
+    }
+    body.control-only #surface {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    #surface { position: relative; user-select: none; }
+    .hidden { display: none !important; }
+    #fixation, #arrow, #message {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+    }
+    #fixation {
+      color: #39ff14;
+      font: 500 clamp(12rem, 26vw, 25rem)/1 Arial, Helvetica, sans-serif;
+    }
+    #arrow {
+      color: #39ff14;
+      font: 500 clamp(12rem, 30vw, 28rem)/1 Arial, Helvetica, sans-serif;
+      transform: translateY(-0.08em);
+    }
+    #hand {
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      width: min(42vh, 38vw);
+      aspect-ratio: 1;
+      object-fit: contain;
+      transform: translate(-50%, -50%);
+    }
+    #hand.left { transform: translate(-50%, -50%) scaleX(-1); }
+    #message {
+      padding: 8vw;
+      color: #f8fafc;
+      font: 700 clamp(3rem, 7vw, 7rem)/1.2 Arial, Helvetica, sans-serif;
+      white-space: pre-line;
+    }
+    #message.error { color: #fb7185; }
+    #fullscreen-toggle {
+      width: min(22rem, 92vw);
+      height: 3.5rem;
+      border: 0;
+      border-radius: 0.75rem;
+      background: #2563eb;
+      color: #fff;
+      font: 700 1.1rem/1 Arial, Helvetica, sans-serif;
+      cursor: pointer;
+    }
+    #fullscreen-toggle:hover { background: #1d4ed8; }
+    #fullscreen-toggle:focus-visible {
+      outline: 3px solid #93c5fd;
+      outline-offset: 3px;
+    }
+    body:not(.control-only) #fullscreen-toggle { display: none; }
+  </style>
+</head>
+<body>
+  <main id="surface" aria-live="off">
+    <div id="fixation" class="hidden" role="img" aria-label="绿色注视十字">+</div>
+    <img id="hand" class="hidden" alt="手部开合动作">
+    <div id="arrow" class="hidden" role="img"></div>
+    <div id="message" class="hidden"></div>
+    <button id="fullscreen-toggle" type="button">进入电脑全屏</button>
+  </main>
+  <script>
+    const HAND_ASSET = "hand-grasp-recorded-v2-30fps.webp?v=motion-clean-v1";
+    const fixation = document.getElementById("fixation");
+    const arrow = document.getElementById("arrow");
+    const message = document.getElementById("message");
+    const fullscreenToggle = document.getElementById("fullscreen-toggle");
+    let hand = document.getElementById("hand");
+    let currentSignature = null;
+
+    // Decode the animation before the first cue so its first display does not
+    // expose the browser's image-loading background.
+    const handPreload = new Image();
+    handPreload.src = HAND_ASSET;
+
+    function send(type, data = {}) {
+      window.parent.postMessage({ isStreamlitMessage: true, type, ...data }, "*");
+    }
+
+    function hideAll() {
+      fixation.classList.add("hidden");
+      hand.classList.add("hidden");
+      arrow.classList.add("hidden");
+      message.classList.add("hidden");
+      message.classList.remove("error");
+    }
+
+    function restartHand(label) {
+      const replacement = hand.cloneNode(false);
+      replacement.className = label === "left" ? "left" : "";
+      replacement.alt = label === "left" ? "左手开合动作" : "右手开合动作";
+      replacement.src = HAND_ASSET;
+      hand.replaceWith(replacement);
+      hand = replacement;
+    }
+
+    function fullscreenDocument() {
+      try {
+        return window.parent.document;
+      } catch (_error) {
+        return document;
+      }
+    }
+
+    function updateFullscreenLabel() {
+      const hostDocument = fullscreenDocument();
+      fullscreenToggle.textContent = hostDocument.fullscreenElement
+        ? "退出电脑全屏（也可按 Esc）"
+        : "进入电脑全屏";
+    }
+
+    async function toggleComputerFullscreen() {
+      const hostDocument = fullscreenDocument();
+      try {
+        if (hostDocument.fullscreenElement) {
+          await hostDocument.exitFullscreen();
+        } else {
+          await hostDocument.documentElement.requestFullscreen({ navigationUI: "hide" });
+        }
+      } catch (_error) {
+        fullscreenToggle.textContent = "全屏被浏览器阻止，请再点一次";
+      }
+      updateFullscreenLabel();
+    }
+
+    fullscreenToggle.addEventListener("click", toggleComputerFullscreen);
+    fullscreenDocument().addEventListener("fullscreenchange", updateFullscreenLabel);
+
+    function render(args) {
+      const controlOnly = Boolean(args.control_only);
+      const stage = String(args.stage || "blank");
+      const label = String(args.label || "");
+      const text = String(args.message || "");
+      const signature = `${controlOnly}\u0000${stage}\u0000${label}\u0000${text}`;
+
+      // Streamlit polls for button state every 50 ms. The iframe and image DOM
+      // must remain untouched until the protocol stage actually changes.
+      if (signature === currentSignature) return;
+      currentSignature = signature;
+      hideAll();
+
+      if (controlOnly) {
+        document.body.classList.add("control-only");
+        updateFullscreenLabel();
+        send("streamlit:setFrameHeight", { height: 72 });
+        return;
+      }
+      document.body.classList.remove("control-only");
+      send("streamlit:setFrameHeight", { height: Math.max(screen.height, 720) });
+
+      if (stage === "ready" || stage === "fixation") {
+        fixation.classList.remove("hidden");
+      } else if (stage === "hand_cue") {
+        restartHand(label);
+      } else if (stage === "motor_imagery") {
+        arrow.textContent = label === "left" ? "←" : "→";
+        arrow.setAttribute("aria-label", label === "left" ? "左箭头" : "右箭头");
+        arrow.classList.remove("hidden");
+      } else if (stage === "break") {
+        message.textContent = text || "休息";
+        message.classList.remove("hidden");
+      } else if (stage === "complete") {
+        message.textContent = "实验结束\n请等待工作人员";
+        message.classList.remove("hidden");
+      } else if (stage === "error") {
+        message.textContent = text || "执行失败";
+        message.classList.add("error");
+        message.classList.remove("hidden");
+      }
+    }
+
+    window.addEventListener("message", (event) => {
+      if (event.data && event.data.type === "streamlit:render") {
+        render(event.data.args || {});
+      }
+    });
+
+    send("streamlit:componentReady", { apiVersion: 1 });
+    send("streamlit:setFrameHeight", { height: 72 });
+  </script>
+</body>
+</html>
