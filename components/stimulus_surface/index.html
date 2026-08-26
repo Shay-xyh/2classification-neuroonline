@@ -5,7 +5,19 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <style>
     * { box-sizing: border-box; }
-    html, body, #surface {
+    html, body {
+      width: 100%;
+      height: 100%;
+      margin: 0;
+    }
+    html { overflow: hidden; }
+    body {
+      overflow-x: hidden;
+      overflow-y: auto;
+      scrollbar-width: none;
+    }
+    body::-webkit-scrollbar { display: none; }
+    #surface {
       width: 100%;
       height: 100%;
       margin: 0;
@@ -18,6 +30,7 @@
     body.control-only #surface {
       background: transparent;
     }
+    body.control-only { overflow: hidden; }
     body.control-only #surface {
       display: flex;
       align-items: center;
@@ -75,6 +88,52 @@
       outline-offset: 3px;
     }
     body:not(.control-only) #fullscreen-toggle { display: none; }
+    #trial-progress-page {
+      width: 100%;
+      min-height: 100%;
+      padding: 8vh 8vw;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: #0b0f19;
+      color: #f8fafc;
+    }
+    body.control-only #trial-progress-page { display: none; }
+    #trial-progress-card {
+      width: min(760px, 100%);
+      padding: clamp(1.4rem, 3vw, 2.2rem);
+      border: 1px solid #334155;
+      border-radius: 1rem;
+      background: #111827;
+      box-shadow: 0 18px 45px rgba(0, 0, 0, 0.35);
+    }
+    #trial-progress-title {
+      display: flex;
+      justify-content: space-between;
+      gap: 1rem;
+      margin-bottom: 1rem;
+      font: 800 clamp(1.1rem, 2.2vw, 1.6rem)/1.3 Arial, Helvetica, sans-serif;
+    }
+    #trial-progress-track {
+      width: 100%;
+      height: 0.9rem;
+      overflow: hidden;
+      border-radius: 999px;
+      background: #334155;
+    }
+    #trial-progress-fill {
+      width: 0;
+      height: 100%;
+      border-radius: inherit;
+      background: #39ff14;
+      transition: width 180ms ease-out;
+    }
+    #trial-progress-hint {
+      margin-top: 0.9rem;
+      color: #94a3b8;
+      font: 500 0.95rem/1.45 Arial, Helvetica, sans-serif;
+      text-align: center;
+    }
   </style>
 </head>
 <body>
@@ -85,12 +144,29 @@
     <div id="message" class="hidden"></div>
     <button id="fullscreen-toggle" type="button">进入电脑全屏</button>
   </main>
+  <section id="trial-progress-page" aria-label="正式采集有效 trial 进度">
+    <div id="trial-progress-card">
+      <div id="trial-progress-title">
+        <span id="trial-progress-count">已完成 0 / 900 个有效 trial</span>
+        <span id="trial-progress-percent">0.0%</span>
+      </div>
+      <div id="trial-progress-track" role="progressbar"
+           aria-valuemin="0" aria-valuemax="900" aria-valuenow="0">
+        <div id="trial-progress-fill"></div>
+      </div>
+      <div id="trial-progress-hint">向上滚动返回刺激画面；作废的 attempt 不计入进度</div>
+    </div>
+  </section>
   <script>
     const HAND_ASSET = "hand-grasp-recorded-v2-30fps.webp?v=motion-clean-v1";
     const fixation = document.getElementById("fixation");
     const arrow = document.getElementById("arrow");
     const message = document.getElementById("message");
     const fullscreenToggle = document.getElementById("fullscreen-toggle");
+    const trialProgressCount = document.getElementById("trial-progress-count");
+    const trialProgressPercent = document.getElementById("trial-progress-percent");
+    const trialProgressTrack = document.getElementById("trial-progress-track");
+    const trialProgressFill = document.getElementById("trial-progress-fill");
     let hand = document.getElementById("hand");
     let currentSignature = null;
 
@@ -152,11 +228,27 @@
     fullscreenToggle.addEventListener("click", toggleComputerFullscreen);
     fullscreenDocument().addEventListener("fullscreenchange", updateFullscreenLabel);
 
+    function updateTrialProgress(args) {
+      const total = Math.max(0, Number.parseInt(args.total_trials || 0, 10) || 0);
+      const requestedCompleted = Math.max(
+        0,
+        Number.parseInt(args.completed_trials || 0, 10) || 0,
+      );
+      const completed = total > 0 ? Math.min(requestedCompleted, total) : 0;
+      const percent = total > 0 ? (100 * completed / total) : 0;
+      trialProgressCount.textContent = `已完成 ${completed} / ${total} 个有效 trial`;
+      trialProgressPercent.textContent = `${percent.toFixed(1)}%`;
+      trialProgressTrack.setAttribute("aria-valuemax", String(total));
+      trialProgressTrack.setAttribute("aria-valuenow", String(completed));
+      trialProgressFill.style.width = `${percent.toFixed(3)}%`;
+    }
+
     function render(args) {
       const controlOnly = Boolean(args.control_only);
       const stage = String(args.stage || "blank");
       const label = String(args.label || "");
       const text = String(args.message || "");
+      updateTrialProgress(args);
       const signature = `${controlOnly}\u0000${stage}\u0000${label}\u0000${text}`;
 
       // Streamlit polls for button state every 50 ms. The iframe and image DOM

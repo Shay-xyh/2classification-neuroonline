@@ -381,17 +381,13 @@ gui._render_running_collection({}, SimpleNamespace())
         self.assertEqual(len(components), 1)
         self.assertIn('"stage": "hand_cue"', components[0].proto.json_args)
         self.assertIn('"label": "left"', components[0].proto.json_args)
-        progress_markup = [
-            node.value
-            for node in app.markdown
-            if "oi-collection-trial-progress" in node.value
-        ]
-        self.assertEqual(len(progress_markup), 1)
-        self.assertIn("已完成 0 / 900 个有效 trial", progress_markup[0])
+        self.assertIn('"completed_trials": 0', components[0].proto.json_args)
+        self.assertIn('"total_trials": 900', components[0].proto.json_args)
         gui_source = (Path(__file__).resolve().parents[1] / "gui.py").read_text(
             encoding="utf-8"
         )
-        self.assertIn("margin: calc(100dvh + 2rem) auto 4rem", gui_source)
+        self.assertIn("pointer-events: auto !important", gui_source)
+        self.assertNotIn("margin: calc(100dvh + 2rem) auto 4rem", gui_source)
 
     def test_completed_collection_is_recovered_after_browser_disconnect(self) -> None:
         import gui

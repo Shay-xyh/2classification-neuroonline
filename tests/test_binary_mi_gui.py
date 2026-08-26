@@ -113,6 +113,14 @@ class BinaryMiGuiTests(unittest.TestCase):
         self.assertIn("requestFullscreen", component_html)
         self.assertIn("进入电脑全屏", component_html)
         self.assertIn("fullscreenchange", component_html)
+        self.assertIn('id="trial-progress-page"', component_html)
+        self.assertIn("overflow-y: auto", component_html)
+        self.assertIn("scrollbar-width: none", component_html)
+        self.assertIn("updateTrialProgress(args);", component_html)
+        self.assertLess(
+            component_html.index("updateTrialProgress(args);"),
+            component_html.index("if (signature === currentSignature) return;"),
+        )
         self.assertNotIn("data:image/webp;base64", component_html)
 
 
