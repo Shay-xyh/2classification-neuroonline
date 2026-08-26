@@ -117,6 +117,7 @@ class BinaryMiGuiTests(unittest.TestCase):
         self.assertIn("overflow-y: auto", component_html)
         self.assertIn("scrollbar-width: none", component_html)
         self.assertIn("updateTrialProgress(args);", component_html)
+        self.assertIn('streamlit:setComponentValue", { value: true', component_html)
         self.assertLess(
             component_html.index("updateTrialProgress(args);"),
             component_html.index("if (signature === currentSignature) return;"),

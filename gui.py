@@ -776,13 +776,13 @@ def _render_collection_stimulus_surface(
     *,
     completed_trials: int,
     total_trials: int,
-) -> None:
+) -> bool:
     """Render the persistent collection surface at one stable Streamlit path."""
 
     surface_epoch = str(
         st.session_state.get("collection_stimulus_surface_epoch", "initial")
     )
-    _stimulus_surface_component(
+    ready = _stimulus_surface_component(
         stage=frame.stage.value,
         label=frame.label or "",
         message=frame.message,
@@ -792,8 +792,9 @@ def _render_collection_stimulus_surface(
         # still contain the preceding run's arrow. The epoch stays unchanged
         # throughout one run, so ordinary 50 ms polling does not remount it.
         key=f"collection_stimulus_surface_{surface_epoch}",
-        default=None,
+        default=False,
     )
+    return ready is True
 
 
 def _render_computer_fullscreen_control() -> None:
@@ -1775,6 +1776,22 @@ def _render_running_collection(
             stable_surface=True,
             render_initial=False,
         )
+        completed_trials, total_trials = _collection_trial_progress(
+            console,
+            protocol,
+        )
+        surface_ready = _render_collection_stimulus_surface(
+            console.stimulus_frame(),
+            completed_trials=completed_trials,
+            total_trials=total_trials,
+        )
+        if not surface_ready:
+            # The acquisition clock must not start until the persistent iframe
+            # has loaded. Otherwise a slow first mount can consume fixation or
+            # cue time before the subject sees the stimulus.
+            time.sleep(0.05)
+            st.rerun()
+            return None
         handle = _start_collection_worker(config, protocol, console)
     else:
         init_live_view(
@@ -1784,17 +1801,16 @@ def _render_running_collection(
             stable_surface=True,
             render_initial=False,
         )
-
-    handle.console.render_pending()
-    completed_trials, total_trials = _collection_trial_progress(
-        handle.console,
-        protocol,
-    )
-    _render_collection_stimulus_surface(
-        handle.console.stimulus_frame(),
-        completed_trials=completed_trials,
-        total_trials=total_trials,
-    )
+        handle.console.render_pending()
+        completed_trials, total_trials = _collection_trial_progress(
+            handle.console,
+            protocol,
+        )
+        _render_collection_stimulus_surface(
+            handle.console.stimulus_frame(),
+            completed_trials=completed_trials,
+            total_trials=total_trials,
+        )
     outcome = handle.outcome()
     if outcome is not None:
         return outcome

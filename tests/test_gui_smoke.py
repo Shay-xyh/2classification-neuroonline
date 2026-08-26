@@ -366,10 +366,18 @@ handle = SimpleNamespace(
     pause_control=CollectionPauseControl(),
     outcome=lambda: None,
 )
-gui._get_collection_worker = lambda config: handle
-gui.time.sleep = lambda seconds: None
-gui.st.rerun = lambda: None
-gui._render_running_collection({}, SimpleNamespace())
+original_get_worker = gui._get_collection_worker
+original_sleep = gui.time.sleep
+original_rerun = gui.st.rerun
+try:
+    gui._get_collection_worker = lambda config: handle
+    gui.time.sleep = lambda seconds: None
+    gui.st.rerun = lambda: None
+    gui._render_running_collection({}, SimpleNamespace())
+finally:
+    gui._get_collection_worker = original_get_worker
+    gui.time.sleep = original_sleep
+    gui.st.rerun = original_rerun
 '''
         app = AppTest.from_string(script, default_timeout=30).run()
 
@@ -388,6 +396,36 @@ gui._render_running_collection({}, SimpleNamespace())
         )
         self.assertIn("pointer-events: auto !important", gui_source)
         self.assertNotIn("margin: calc(100dvh + 2rem) auto 4rem", gui_source)
+
+    def test_collection_worker_waits_until_stimulus_surface_is_ready(self) -> None:
+        script = r'''
+import streamlit as st
+from types import SimpleNamespace
+import gui
+
+original_get_worker = gui._get_collection_worker
+original_render_surface = gui._render_collection_stimulus_surface
+original_start_worker = gui._start_collection_worker
+original_sleep = gui.time.sleep
+original_rerun = gui.st.rerun
+try:
+    gui._get_collection_worker = lambda config: None
+    gui._render_collection_stimulus_surface = lambda *args, **kwargs: False
+    def forbidden_start(*args, **kwargs):
+        raise AssertionError("collection worker started before stimulus surface was ready")
+    gui._start_collection_worker = forbidden_start
+    gui.time.sleep = lambda seconds: None
+    gui.st.rerun = lambda: None
+    gui._render_running_collection({}, SimpleNamespace())
+finally:
+    gui._get_collection_worker = original_get_worker
+    gui._render_collection_stimulus_surface = original_render_surface
+    gui._start_collection_worker = original_start_worker
+    gui.time.sleep = original_sleep
+    gui.st.rerun = original_rerun
+'''
+        app = AppTest.from_string(script, default_timeout=30).run()
+        self.assertEqual(list(app.exception), [])
 
     def test_completed_collection_is_recovered_after_browser_disconnect(self) -> None:
         import gui
