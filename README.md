@@ -1,4 +1,4 @@
-# oi-mi
+# 2classification-neuroonline
 
 `oi-mi` 是用于左右手二分类运动想象 EEG 实验的数据采集程序。当前正式采集只使用
 Neuracle（博睿康）设备与 JellyFish 数据转发；采集入口不会加载、训练、推理或更新模型。
