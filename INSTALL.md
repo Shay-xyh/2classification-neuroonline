@@ -14,13 +14,13 @@
 winget install --id Git.Git --exact --source winget --accept-package-agreements --accept-source-agreements
 ```
 
-关闭并重新打开PowerShell，然后从个人仓库克隆采集版代码。把下面地址替换成实际仓库地址：
+关闭并重新打开PowerShell，然后从以下唯一仓库的 `main` 分支克隆：
 
 ```powershell
 New-Item -ItemType Directory -Path D:\Projects -Force
 Set-Location D:\Projects
-git clone https://github.com/<你的账号>/<仓库名>.git oi-mi
-Set-Location .\oi-mi
+git clone https://github.com/Shay-xyh/2classification-neuroonline.git oi-mi
+Set-Location D:\Projects\oi-mi
 ```
 
 私有仓库会要求登录GitHub；使用浏览器或Git Credential Manager完成登录，不要把访问令牌
@@ -32,6 +32,54 @@ D:\Projects\oi-mi
 
 仓库不应包含 `.venv`、采集记录、运行缓存、模型权重、原始视频或临时动画帧。Python
 虚拟环境必须在新电脑重新创建。
+
+### 已有实验电脑：更新代码
+
+仓库地址必须是：
+
+```text
+https://github.com/Shay-xyh/2classification-neuroonline.git
+```
+
+如果工作区没有本地修改，可以普通更新：
+
+```powershell
+$ProjectPath = 'D:\Projects\oi-mi'
+git -C $ProjectPath remote set-url origin https://github.com/Shay-xyh/2classification-neuroonline.git
+git -C $ProjectPath pull --ff-only origin main
+py -3.12 "$ProjectPath\setup_local.py"
+```
+
+GUI会把本机设备、被试和采集计划写入 `config.yaml`，所以实验电脑通常会显示本地修改。
+需要强制采用远端代码、但保留本机配置时，使用：
+
+```powershell
+$ProjectPath = 'D:\Projects\oi-mi'
+$ConfigBackup = 'D:\Projects\oi-mi-config.local.yaml'
+
+Copy-Item -LiteralPath "$ProjectPath\config.yaml" -Destination $ConfigBackup -Force
+git -C $ProjectPath remote set-url origin https://github.com/Shay-xyh/2classification-neuroonline.git
+git -C $ProjectPath fetch origin
+git -C $ProjectPath reset --hard origin/main
+Copy-Item -LiteralPath $ConfigBackup -Destination "$ProjectPath\config.yaml" -Force
+py -3.12 "$ProjectPath\setup_local.py"
+git -C $ProjectPath status --short
+```
+
+如果连本机 `config.yaml` 也要丢弃、完全恢复为仓库中的 Neuracle 9×100 默认配置，则省略
+两条 `Copy-Item` 命令：
+
+```powershell
+$ProjectPath = 'D:\Projects\oi-mi'
+git -C $ProjectPath remote set-url origin https://github.com/Shay-xyh/2classification-neuroonline.git
+git -C $ProjectPath fetch origin
+git -C $ProjectPath reset --hard origin/main
+py -3.12 "$ProjectPath\setup_local.py"
+```
+
+`git reset --hard origin/main` 会丢弃所有已跟踪代码和配置的本地修改，但不会删除被忽略的
+`records_storage`、`.venv` 和 `.runtime`。不要在实验电脑运行 `git clean -fdx`，该命令会
+删除被忽略的采集记录和虚拟环境。强制更新后必须重新核对第5节的正式配置，再启动采集。
 
 ## 2. 安装博睿康软件
 

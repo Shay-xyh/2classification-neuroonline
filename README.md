@@ -14,6 +14,41 @@ Neuracle（博睿康）设备与 JellyFish 数据转发；采集入口不会加�
 
 完整定义以 [CURRENT_EXPERIMENT_PROTOCOL.md](CURRENT_EXPERIMENT_PROTOCOL.md) 为准。
 
+## 获取与更新代码
+
+唯一使用的仓库和分支：
+
+```text
+https://github.com/Shay-xyh/2classification-neuroonline.git
+main
+```
+
+新电脑首次克隆：
+
+```powershell
+New-Item -ItemType Directory -Path D:\Projects -Force
+Set-Location D:\Projects
+git clone https://github.com/Shay-xyh/2classification-neuroonline.git oi-mi
+Set-Location D:\Projects\oi-mi
+py -3.12 setup_local.py
+```
+
+实验电脑强制同步到远端 `main`，同时保留本机 `config.yaml`：
+
+```powershell
+$ProjectPath = 'D:\Projects\oi-mi'
+$ConfigBackup = 'D:\Projects\oi-mi-config.local.yaml'
+Copy-Item -LiteralPath "$ProjectPath\config.yaml" -Destination $ConfigBackup -Force
+git -C $ProjectPath remote set-url origin https://github.com/Shay-xyh/2classification-neuroonline.git
+git -C $ProjectPath fetch origin
+git -C $ProjectPath reset --hard origin/main
+Copy-Item -LiteralPath $ConfigBackup -Destination "$ProjectPath\config.yaml" -Force
+py -3.12 "$ProjectPath\setup_local.py"
+```
+
+该操作不会删除被 `.gitignore` 排除的 `records_storage`、`.venv` 或 `.runtime`。完整更新说明、
+采用远端默认配置的方法和安全检查见 [首次部署](INSTALL.md)。
+
 ## 已配置电脑上的启动方式
 
 先启动博睿康原生软件与 JellyFish 数据转发，再运行：
