@@ -30,10 +30,9 @@
 Test-NetConnection 127.0.0.1 -Port 8712
 ```
 
-8. 验证EEG数据：
+8. 在项目根目录打开PowerShell，验证EEG数据：
 
 ```powershell
-Set-Location D:\path\to\oi-mi
 .\.venv\Scripts\python.exe cli.py probe-device --device neuracle --duration 5
 ```
 

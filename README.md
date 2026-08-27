@@ -23,21 +23,22 @@ https://github.com/Shay-xyh/2classification-neuroonline.git
 main
 ```
 
-新电脑首次克隆：
+新电脑首次克隆：先在资源管理器中进入你希望存放项目的文件夹，在该文件夹中打开
+PowerShell，然后执行：
 
 ```powershell
-New-Item -ItemType Directory -Path D:\Projects -Force
-Set-Location D:\Projects
 git clone https://github.com/Shay-xyh/2classification-neuroonline.git oi-mi
-Set-Location D:\Projects\oi-mi
-py -3.12 setup_local.py
+Set-Location .\oi-mi
+py -3.12 .\setup_local.py
 ```
 
-实验电脑强制同步到远端 `main`，同时保留本机 `config.yaml`：
+实验电脑强制同步到远端 `main` 时，先在项目根目录（能够看到 `cli.py` 的目录）打开
+PowerShell。以下命令从当前目录自动取得项目路径，并保留本机 `config.yaml`：
 
 ```powershell
-$ProjectPath = 'D:\Projects\oi-mi'
-$ConfigBackup = 'D:\Projects\oi-mi-config.local.yaml'
+$ProjectPath = (Get-Location).Path
+if (-not (Test-Path -LiteralPath "$ProjectPath\cli.py")) { throw '当前目录不是项目根目录' }
+$ConfigBackup = Join-Path (Split-Path -Parent $ProjectPath) 'oi-mi-config.local.yaml'
 Copy-Item -LiteralPath "$ProjectPath\config.yaml" -Destination $ConfigBackup -Force
 git -C $ProjectPath remote set-url origin https://github.com/Shay-xyh/2classification-neuroonline.git
 git -C $ProjectPath fetch origin
@@ -51,10 +52,9 @@ py -3.12 "$ProjectPath\setup_local.py"
 
 ## 已配置电脑上的启动方式
 
-先启动博睿康原生软件与 JellyFish 数据转发，再运行：
+先启动博睿康原生软件与 JellyFish 数据转发，再在项目根目录打开 PowerShell 并运行：
 
 ```powershell
-Set-Location D:\path\to\oi-mi
 .\.venv\Scripts\python.exe cli.py gui
 ```
 

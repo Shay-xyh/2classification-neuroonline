@@ -14,21 +14,17 @@
 winget install --id Git.Git --exact --source winget --accept-package-agreements --accept-source-agreements
 ```
 
-关闭并重新打开PowerShell，然后从以下唯一仓库的 `main` 分支克隆：
+关闭并重新打开PowerShell。在资源管理器中进入你希望存放项目的文件夹，在该文件夹中
+打开PowerShell，然后从以下唯一仓库的 `main` 分支克隆：
 
 ```powershell
-New-Item -ItemType Directory -Path D:\Projects -Force
-Set-Location D:\Projects
 git clone https://github.com/Shay-xyh/2classification-neuroonline.git oi-mi
-Set-Location D:\Projects\oi-mi
+Set-Location .\oi-mi
 ```
 
 私有仓库会要求登录GitHub；使用浏览器或Git Credential Manager完成登录，不要把访问令牌
-写进配置文件或提交到仓库。克隆后的项目位置例如：
-
-```text
-D:\Projects\oi-mi
-```
+写进配置文件或提交到仓库。项目可以放在任意本地磁盘目录；后续命令均以“当前已进入
+项目根目录”为前提，不依赖固定盘符或绝对路径。
 
 仓库不应包含 `.venv`、采集记录、运行缓存、模型权重、原始视频或临时动画帧。Python
 虚拟环境必须在新电脑重新创建。
@@ -41,10 +37,12 @@ D:\Projects\oi-mi
 https://github.com/Shay-xyh/2classification-neuroonline.git
 ```
 
-如果工作区没有本地修改，可以普通更新：
+先在资源管理器中进入现有项目根目录（能够看到 `cli.py` 的目录），在该目录中打开
+PowerShell。如果工作区没有本地修改，可以普通更新：
 
 ```powershell
-$ProjectPath = 'D:\Projects\oi-mi'
+$ProjectPath = (Get-Location).Path
+if (-not (Test-Path -LiteralPath "$ProjectPath\cli.py")) { throw '当前目录不是项目根目录' }
 git -C $ProjectPath remote set-url origin https://github.com/Shay-xyh/2classification-neuroonline.git
 git -C $ProjectPath pull --ff-only origin main
 py -3.12 "$ProjectPath\setup_local.py"
@@ -54,8 +52,9 @@ GUI会把本机设备、被试和采集计划写入 `config.yaml`，所以实验
 需要强制采用远端代码、但保留本机配置时，使用：
 
 ```powershell
-$ProjectPath = 'D:\Projects\oi-mi'
-$ConfigBackup = 'D:\Projects\oi-mi-config.local.yaml'
+$ProjectPath = (Get-Location).Path
+if (-not (Test-Path -LiteralPath "$ProjectPath\cli.py")) { throw '当前目录不是项目根目录' }
+$ConfigBackup = Join-Path (Split-Path -Parent $ProjectPath) 'oi-mi-config.local.yaml'
 
 Copy-Item -LiteralPath "$ProjectPath\config.yaml" -Destination $ConfigBackup -Force
 git -C $ProjectPath remote set-url origin https://github.com/Shay-xyh/2classification-neuroonline.git
@@ -70,7 +69,8 @@ git -C $ProjectPath status --short
 两条 `Copy-Item` 命令：
 
 ```powershell
-$ProjectPath = 'D:\Projects\oi-mi'
+$ProjectPath = (Get-Location).Path
+if (-not (Test-Path -LiteralPath "$ProjectPath\cli.py")) { throw '当前目录不是项目根目录' }
 git -C $ProjectPath remote set-url origin https://github.com/Shay-xyh/2classification-neuroonline.git
 git -C $ProjectPath fetch origin
 git -C $ProjectPath reset --hard origin/main
@@ -80,6 +80,27 @@ py -3.12 "$ProjectPath\setup_local.py"
 `git reset --hard origin/main` 会丢弃所有已跟踪代码和配置的本地修改，但不会删除被忽略的
 `records_storage`、`.venv` 和 `.runtime`。不要在实验电脑运行 `git clean -fdx`，该命令会
 删除被忽略的采集记录和虚拟环境。强制更新后必须重新核对第5节的正式配置，再启动采集。
+
+### 无网络时使用U盘部署或更新
+
+可以把完整的 `oi-mi-collection-release` 文件夹复制到采集电脑的任意本地目录，但不要把
+它直接覆盖合并到旧项目目录。覆盖合并可能保留已被新版删除的旧文件，重新引入版本残余和
+冲突。推荐流程如下：
+
+1. 退出GUI并确认没有采集任务运行；
+2. 保留旧项目目录，不删除其中的 `records_storage`；
+3. 从旧项目复制一份 `config.yaml` 到项目目录之外作为备份；
+4. 将U盘中的release文件夹完整复制到本地磁盘，作为一个全新的项目目录；
+5. 如需沿用设备设置，将备份的 `config.yaml` 复制到新项目根目录并替换同名文件；
+6. 在新项目根目录打开PowerShell，执行：
+
+```powershell
+py -3.12 .\setup_local.py
+.\.venv\Scripts\python.exe cli.py gui
+```
+
+确认无硬件测试、正式参数和保存位置均正确后，再使用新目录采集。旧目录至少保留到新版本
+验证完成并完成历史数据备份；不要从U盘直接运行程序，避免速度、盘符变化和意外拔盘影响采集。
 
 ## 2. 安装博睿康软件
 
@@ -132,11 +153,10 @@ TcpTestSucceeded : True
 winget install --id Python.Python.3.12 --exact --source winget --scope user --accept-package-agreements --accept-source-agreements
 ```
 
-安装后关闭并重新打开PowerShell，再执行：
+安装后关闭并重新打开PowerShell，在项目根目录打开PowerShell，再执行：
 
 ```powershell
-Set-Location D:\Projects\oi-mi
-py -3.12 setup_local.py
+py -3.12 .\setup_local.py
 ```
 
 脚本会：
